@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solar Panel Dashboard</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <!-- <link href="/styles.css" rel="stylesheet"> -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="header-content">
+                <h1><i class="fas fa-solar-panel"></i> Solar Dashboard</h1>
+                <div class="last-update">
+                    Last Updated: <span id="lastUpdate">
+                        <%= new Date(lastUpdate).toLocaleDateString() %>
+                    </span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Quick Stats Cards -->
+        <div class="stats-grid">
+            <div class="stat-card primary">
+                <div class="stat-icon">
+                    <i class="fas fa-sun"></i>
+                </div>
+                <div class="stat-content">
+                    <h3>Today's Generation</h3>
+                    <div class="stat-value" id="todayGeneration">
+                        <%= todayGeneration %> kWh
+                    </div>
+                    <div class="stat-trend">
+                        <i class="fas fa-arrow-up"></i>
+                        <span id="todayTrend">Active</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stat-card success">
+                <div class="stat-icon">
+                    <i class="fas fa-chart-line"></i>
+                </div>
+                <div class="stat-content">
+                    <h3>Total Generation</h3>
+                    <div class="stat-value" id="totalGeneration">
+                        <%= stats.totalGeneration.toFixed(2) %> kWh
+                    </div>
+                    <div class="stat-trend">
+                        <i class="fas fa-leaf"></i>
+                        <span>Lifetime</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stat-card warning">
+                <div class="stat-icon">
+                    <i class="fas fa-rupee-sign"></i>
+                </div>
+                <div class="stat-content">
+                    <h3>Total Savings</h3>
+                    <div class="stat-value" id="totalSavings">₹<%= stats.totalSavings.toFixed(0) %>
+                    </div>
+                    <div class="stat-trend">
+                        <i class="fas fa-piggy-bank"></i>
+                        <span>Accumulated</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stat-card info">
+                <div class="stat-icon">
+                    <i class="fas fa-gauge"></i>
+                </div>
+                <div class="stat-content">
+                    <h3>Efficiency</h3>
+                    <div class="stat-value" id="efficiency">
+                        <%= stats.efficiency.toFixed(1) %>%
+                    </div>
+                    <div class="stat-trend">
+                        <i class="fas fa-bolt"></i>
+                        <span>Performance</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="main-grid">
+            <!-- Charts Section -->
+            <div class="chart-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-chart-area"></i> Generation Trends</h3>
+                        <div class="chart-controls">
+                            <button class="btn-small" onclick="toggleChartType()">
+                                <i class="fas fa-exchange-alt"></i> Switch View
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="generationChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Add Reading Section -->
+            <div class="add-reading-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-plus-circle"></i> Add New Reading</h3>
+                    </div>
+                    <div class="card-body">
+                        <form id="addReadingForm" class="reading-form">
+                            <div class="form-group">
+                                <label for="reading_date">Date</label>
+                                <input type="date" id="reading_date" name="date"
+                                    value="<%= new Date().toISOString().split('T')[0] %>" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="today_reading">Meter Reading (kWh)</label>
+                                <input type="number" id="today_reading" name="today_reading" step="0.01" min="0"
+                                    placeholder="Enter current meter reading" required>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-plus"></i> Add Reading
+                            </button>
+                        </form>
+
+                        <div id="formMessage" class="form-message"></div>
+                    </div>
+                </div>
+
+                <!-- Quick Stats -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-info-circle"></i> Quick Stats</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="quick-stats">
+                            <div class="quick-stat">
+                                <span class="label">Monthly Generation:</span>
+                                <span class="value" id="monthlyGeneration">Loading...</span>
+                            </div>
+                            <div class="quick-stat">
+                                <span class="label">Monthly Savings:</span>
+                                <span class="value" id="monthlySavings">Loading...</span>
+                            </div>
+                            <div class="quick-stat">
+                                <span class="label">Average Daily:</span>
+                                <span class="value" id="avgGeneration">Loading...</span>
+                            </div>
+                            <div class="quick-stat">
+                                <span class="label">Current Meter:</span>
+                                <span class="value" id="currentMeter">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Readings Table -->
+        <div class="card">
+            <div class="card-header">
+                <h3><i class="fas fa-table"></i> Recent Readings</h3>
+                <button class="btn-small" onclick="refreshData()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="table-container">
+                    <table class="readings-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Meter Reading</th>
+                                <th>Daily Generation</th>
+                                <th>Savings (₹)</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="readingsTableBody">
+                            <% readings.forEach(reading=> { %>
+                                <tr data-date="<%= reading.date %>">
+                                    <td>
+                                        <%= new Date(reading.date).toLocaleDateString() %>
+                                    </td>
+                                    <td>
+                                        <%= parseFloat(reading.meter_reading).toFixed(2) %> kWh
+                                    </td>
+                                    <td>
+                                        <%= parseFloat(reading.daily_generation).toFixed(2) %> kWh
+                                    </td>
+                                    <td>₹<%= (parseFloat(reading.daily_generation) * 15).toFixed(0) %>
+                                    </td>
+                                    <td>
+                                        <button class="btn-danger btn-small"
+                                            onclick="deleteReading('<%= reading.date %>')">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                                <% }); %>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <p>Processing...</p>
+    </div>
+
+    <!-- Success/Error Toast -->
+    <div id="toast" class="toast"></div>
+
+    <script src="/dashboard.js"></script>
+</body>
+
+</html>
