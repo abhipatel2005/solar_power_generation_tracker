@@ -11,6 +11,12 @@ class SolarDashboard {
         this.loadChartData();
         this.loadStats();
         this.setupAutoRefresh();
+        this.setUpMaxDate();
+    }
+
+    setUpMaxDate() {
+        document.getElementById('reading_date').setAttribute('max', new Date().toISOString().split('T')[0]);
+        document.getElementById('reading_date').setAttribute('min', new Date().toISOString().split('T')[0]);
     }
 
     setupEventListeners() {
@@ -110,38 +116,23 @@ class SolarDashboard {
         }
 
         const chartConfig = {
-            type: this.chartType,
+            type: 'line',
             data: {
                 labels: data.map(item => new Date(item.date).toLocaleDateString()),
                 datasets: [
                     {
                         label: 'Daily Generation (kWh)',
                         data: data.map(item => item.daily_generation),
-                        backgroundColor: this.chartType === 'bar' ? 'rgba(255, 107, 53, 0.6)' : 'rgba(255, 107, 53, 0.1)',
+                        backgroundColor: 'rgba(255, 107, 53, 0.1)',
                         borderColor: '#ff6b35',
                         borderWidth: 3,
-                        fill: this.chartType === 'line',
+                        fill: true,
                         tension: 0.4,
                         pointBackgroundColor: '#ff6b35',
                         pointBorderColor: '#ffffff',
                         pointBorderWidth: 2,
                         pointRadius: 5,
                         pointHoverRadius: 8
-                    },
-                    {
-                        label: 'Cumulative Reading (kWh)',
-                        data: data.map(item => item.meter_reading),
-                        backgroundColor: 'rgba(247, 147, 30, 0.1)',
-                        borderColor: '#f7931e',
-                        borderWidth: 2,
-                        fill: false,
-                        tension: 0.4,
-                        pointBackgroundColor: '#f7931e',
-                        pointBorderColor: '#ffffff',
-                        pointBorderWidth: 2,
-                        pointRadius: 4,
-                        pointHoverRadius: 6,
-                        yAxisID: 'y1'
                     }
                 ]
             },
@@ -178,16 +169,12 @@ class SolarDashboard {
                                 return 'Date: ' + context[0].label;
                             },
                             label: function (context) {
-                                const label = context.dataset.label;
                                 const value = context.parsed.y.toFixed(2);
-                                return label + ': ' + value + ' kWh';
+                                return 'Daily Generation: ' + value + ' kWh';
                             },
                             afterLabel: function (context) {
-                                if (context.datasetIndex === 0) {
-                                    const savings = (context.parsed.y * 15).toFixed(0);
-                                    return 'Savings: ₹' + savings;
-                                }
-                                return '';
+                                const savings = (context.parsed.y * 2.25).toFixed(0);
+                                return 'Savings: ₹' + savings;
                             }
                         }
                     }
@@ -206,9 +193,6 @@ class SolarDashboard {
                         }
                     },
                     y: {
-                        type: 'linear',
-                        display: true,
-                        position: 'left',
                         title: {
                             display: true,
                             text: 'Daily Generation (kWh)',
@@ -219,28 +203,6 @@ class SolarDashboard {
                         },
                         grid: {
                             color: 'rgba(0, 0, 0, 0.05)',
-                            drawBorder: false
-                        },
-                        ticks: {
-                            font: {
-                                size: 11
-                            }
-                        }
-                    },
-                    y1: {
-                        type: 'linear',
-                        display: true,
-                        position: 'right',
-                        title: {
-                            display: true,
-                            text: 'Cumulative Reading (kWh)',
-                            font: {
-                                size: 12,
-                                weight: '600'
-                            }
-                        },
-                        grid: {
-                            drawOnChartArea: false,
                             drawBorder: false
                         },
                         ticks: {
@@ -337,7 +299,7 @@ class SolarDashboard {
                     <td>${new Date(reading.date).toLocaleDateString()}</td>
                     <td>${reading.meter_reading.toFixed(2)} kWh</td>
                     <td>${reading.daily_generation.toFixed(2)} kWh</td>
-                    <td>₹${(reading.daily_generation * 15).toFixed(0)}</td>
+                    <td>₹${(reading.daily_generation * 2.25).toFixed(0)}</td>
                     <td>
                         <button class="btn-danger btn-small" onclick="deleteReading('${reading.date}')">
                             <i class="fas fa-trash"></i>
@@ -388,10 +350,10 @@ class SolarDashboard {
         }
     }
 
-    toggleChartType() {
-        this.chartType = this.chartType === 'line' ? 'bar' : 'line';
-        this.loadChartData();
-    }
+    // toggleChartType() {
+    //     this.chartType = this.chartType === 'line' ? 'bar' : 'line';
+    //     this.loadChartData();
+    // }
 
     showLoading(show) {
         const overlay = document.getElementById('loadingOverlay');
@@ -448,9 +410,9 @@ function deleteReading(date) {
     dashboard.deleteReading(date);
 }
 
-function toggleChartType() {
-    dashboard.toggleChartType();
-}
+// function toggleChartType() {
+//     dashboard.toggleChartType();
+// }
 
 function refreshData() {
     dashboard.refreshData();
@@ -478,10 +440,10 @@ function exportData() {
 function convertToCSV(data) {
     const headers = ['Date', 'Meter Reading (kWh)', 'Daily Generation (kWh)', 'Savings (₹)'];
     const rows = data.map(item => [
-        new Date(item.date).toLocaleDateString(),
+        new Date(item.date).toISOString().split('T')[0],
         item.meter_reading.toFixed(2),
         item.daily_generation.toFixed(2),
-        (item.daily_generation * 15).toFixed(0)
+        (item.daily_generation * 2.25).toFixed(0)
     ]);
 
     return [headers, ...rows].map(row => row.join(',')).join('\n');
@@ -523,8 +485,8 @@ function printDashboard() {
 }
 
 // Add responsive chart resize
-window.addEventListener('resize', function () {
-    if (dashboard && dashboard.chart) {
-        dashboard.chart.resize();
-    }
-});
+// window.addEventListener('resize', function () {
+//     if (dashboard && dashboard.chart) {
+//         dashboard.chart.resize();
+//     }
+// });

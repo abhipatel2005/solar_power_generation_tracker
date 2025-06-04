@@ -1,8 +1,10 @@
 // Main dashboard route
 const express = require('express');
+const session = require('express-session');
 const bodyParser = require('body-parser');
 const mysql2 = require('mysql2');
 const path = require('path');
+const crypto = require('crypto');
 const dotenv = require('dotenv');
 dotenv.config();
 
@@ -12,7 +14,8 @@ const db = mysql2.createConnection({
     user: process.env.USER,
     password: process.env.PASSWORD,
     database: process.env.DATABASE,
-    port: process.env.DATABASE_PORT
+    port: process.env.DATABASE_PORT,
+    supportBigNumbers: true
 });
 
 // Connect to the database
@@ -28,17 +31,29 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 
+//configure session
+app.use(session({
+    secret: process.env.secret, // use a strong secret in production!
+    resave: false,
+    saveUninitialized: false,
+    cookie: { secure: false } // set `true` only if using HTTPS
+}));
+
 
 app.get('/', (req, res) => {
+    if (!req.session.userId) {
+        return res.redirect('/login');
+    }
+    const userId = req.session.userId;
     const query = `
         SELECT
             date, meter_reading, daily_generation  
-        FROM readings
+        FROM readings where user_id = ?
         ORDER BY date DESC
         LIMIT 30
     `;
 
-    db.query(query, (err, results) => {
+    db.query(query, [userId], (err, results) => {
         if (err) {
             console.error("Error fetching readings:", err);
             return res.status(500).json({ error: 'Database query failed' });
@@ -46,7 +61,6 @@ app.get('/', (req, res) => {
 
         // Calculate statistics
         const stats = calculateStats(results);
-
         res.render('dashboard', {
             readings: results,
             stats: stats,
@@ -56,17 +70,30 @@ app.get('/', (req, res) => {
     });
 });
 
+//api endpoint for login page
+app.get('/register', (req, res) => {
+    res.render('register');
+});
+
+app.get('/login', (req, res) => {
+    res.render('login');
+});
+
 // API endpoint for chart data
 app.get('/api/chart-data', (req, res) => {
+    if (!req.session.userId) {
+        return res.status(401).json({ error: 'Unauthorized access' });
+    }
+    const userId = req.session.userId;
     const query = `
         SELECT
             date, meter_reading, daily_generation  
-        FROM readings
+        FROM readings WHERE user_id = ?
         ORDER BY date ASC
         LIMIT 30
     `;
 
-    db.query(query, (err, results) => {
+    db.query(query, [userId], (err, results) => {
         if (err) {
             console.error("Error fetching chart data:", err);
             return res.status(500).json({ error: 'Database query failed' });
@@ -77,7 +104,6 @@ app.get('/api/chart-data', (req, res) => {
             meter_reading: parseFloat(reading.meter_reading) || 0,
             daily_generation: parseFloat(reading.daily_generation) || 0
         }));
-
         res.json(chartData);
     });
 });
@@ -93,9 +119,10 @@ app.get('/api/stats', (req, res) => {
                 FROM readings 
                 ORDER BY date DESC 
                 LIMIT 1`,
-        average: `SELECT AVG(daily_generation) as avg_generation 
-                  FROM readings 
-                  WHERE date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)`
+        average: `SELECT AVG(daily_generation) AS avg_generation
+                    FROM readings
+                    WHERE date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                    AND daily_generation != 0;`
     };
 
     // Execute all queries
@@ -126,7 +153,7 @@ app.get('/api/stats', (req, res) => {
         })
     ])
         .then(([totalGeneration, monthlyGeneration, todayData, avgGeneration]) => {
-            const ratePerKwh = 15; // Rate per kWh in rupees
+            const ratePerKwh = 2.25; // Rate per kWh in rupees
             const stats = {
                 todayGeneration: parseFloat(todayData.daily_generation) || 0,
                 totalGeneration: parseFloat(totalGeneration) || 0,
@@ -146,19 +173,102 @@ app.get('/api/stats', (req, res) => {
         });
 });
 
+//register user
+app.post('/register', (req, res) => {
+    const { email, password } = req.body;
+
+    // Validate input
+    if (!email || !password) {
+        return res.status(400).json({ message: 'Email and password are required.' });
+    }
+
+    const checkUserQuery = 'SELECT * FROM users WHERE email = ?';
+    db.query(checkUserQuery, [email], (err, results) => {
+        if (err) {
+            console.error('Error checking user:', err);
+            return res.status(500).json({ message: 'Database error.' });
+        }
+
+        if (results.length > 0) {
+            return res.status(400).json({ message: 'User already exists.' });
+        } else {
+            function generateSecureNumericId() {
+                const buffer = crypto.randomBytes(8); // 64-bit
+                const id = BigInt('0x' + buffer.toString('hex'));
+                return id.toString(); // Convert to string for insertion
+            }
+
+            // When inserting into DB:
+            const userId = generateSecureNumericId();
+
+            const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
+
+            const insertUserQuery = 'INSERT INTO users (id , email, password_hashed) VALUES (?, ?, ?)';
+            db.query(insertUserQuery, [userId, email, passwordHash], (err, result) => {
+                if (err) {
+                    console.error('Error inserting user:', err);
+                    return res.status(500).json({ message: 'Failed to register user.' });
+                }
+
+                res.render('login');
+            });
+        }
+
+    });
+});
+
+// User login
+app.post('/login', (req, res) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+        return res.status(400).json({ message: 'Email and password are required.' });
+    }
+
+    const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
+
+    db.query('SELECT * FROM users WHERE email = ? AND password_hashed = ?', [email, passwordHash], (err, results) => {
+        if (err) {
+            console.error('Error during login:', err);
+            return res.status(500).json({ message: 'Database error.' });
+        }
+
+        if (results.length > 0) {
+            const userId = results[0].id;
+
+            // Save user ID in session
+            req.session.userId = userId;
+
+            console.log('✅ User logged in:', email);
+            res.redirect('/');
+        } else {
+            console.log('❌ Invalid login attempt for:', email);
+            res.status(401).json({ message: 'Invalid email or password.' });
+        }
+    });
+});
+
 // Submit reading with improved logic
 app.post('/add_readings', (req, res) => {
     const today_reading = parseFloat(req.body.today_reading);
-    const date = new Date().toISOString().split('T')[0];
+    const inputDate = req.body.date.toISOString().split('T')[0];
+    const today = new Date().toISOString().split('T')[0];
+    const userId = req.session.userId;
+    console.log(userId)
 
+    // Prevent historical entries
+    if (inputDate < today) {
+        return res.status(400).json({
+            message: 'Historical readings are not allowed. Please enter readings for today only.'
+        });
+    }
     if (!today_reading || today_reading <= 0) {
         return res.status(400).json({ message: 'Invalid meter reading provided.' });
     }
 
     // Get the last meter reading (not daily generation)
-    const retrieveQuery = 'SELECT meter_reading FROM readings ORDER BY date DESC LIMIT 1';
-
-    db.query(retrieveQuery, (err, results) => {
+    const retrieveQuery = 'SELECT meter_reading FROM readings where user_id = ? ORDER BY date DESC LIMIT 1';
+    db.query(retrieveQuery, [userId], (err, results) => {
         if (err) {
             console.error('Error retrieving last reading:', err);
             return res.status(500).json({ message: 'Failed to retrieve last reading.' });
@@ -171,7 +281,6 @@ app.post('/add_readings', (req, res) => {
             lastMeterReading = parseFloat(results[0].meter_reading) || 0;
             daily_generation = today_reading - lastMeterReading;
         } else {
-            // First reading - no daily generation can be calculated
             daily_generation = 0;
         }
 
@@ -183,8 +292,8 @@ app.post('/add_readings', (req, res) => {
         }
 
         // Insert the new reading
-        const insertQuery = 'INSERT INTO readings (date, meter_reading, daily_generation) VALUES (?, ?, ?)';
-        db.query(insertQuery, [date, today_reading, daily_generation], (err, result) => {
+        const insertQuery = 'INSERT INTO readings (date, meter_reading, daily_generation, user_id) VALUES (?, ?, ?, ?)';
+        db.query(insertQuery, [inputDate, today_reading, daily_generation, userId], (err, result) => {
             if (err) {
                 console.error('Error inserting new reading:', err);
                 return res.status(500).json({ message: 'Failed to insert new reading.' });
@@ -198,7 +307,8 @@ app.post('/add_readings', (req, res) => {
                     data: {
                         date: date,
                         meter_reading: today_reading,
-                        daily_generation: daily_generation
+                        daily_generation: daily_generation,
+                        user_id: userId
                     }
                 });
             } else {
@@ -206,7 +316,8 @@ app.post('/add_readings', (req, res) => {
                     message: 'Reading added successfully',
                     date: date,
                     meter_reading: today_reading,
-                    daily_generation: daily_generation
+                    daily_generation: daily_generation,
+                    user_id: userId
                 });
             }
         });
@@ -217,6 +328,7 @@ app.post('/add_readings', (req, res) => {
 app.post('/api/add_reading', (req, res) => {
     const today_reading = parseFloat(req.body.today_reading);
     const reading_date = req.body.date || new Date().toISOString().split('T')[0];
+    const userId = req.session.userId;
 
     if (!today_reading || today_reading <= 0) {
         return res.status(400).json({
@@ -226,9 +338,9 @@ app.post('/api/add_reading', (req, res) => {
     }
 
     // Get the last meter reading
-    const retrieveQuery = 'SELECT meter_reading FROM readings WHERE date < ? ORDER BY date DESC LIMIT 1';
+    const retrieveQuery = 'SELECT meter_reading FROM readings WHERE date < ? and user_id = ? ORDER BY date DESC LIMIT 1';
 
-    db.query(retrieveQuery, [reading_date], (err, results) => {
+    db.query(retrieveQuery, [reading_date, userId], (err, results) => {
         if (err) {
             console.error('Error retrieving last reading:', err);
             return res.status(500).json({
@@ -287,8 +399,8 @@ app.post('/api/add_reading', (req, res) => {
                 });
             } else {
                 // Insert new reading
-                const insertQuery = 'INSERT INTO readings (date, meter_reading, daily_generation) VALUES (?, ?, ?)';
-                db.query(insertQuery, [reading_date, today_reading, daily_generation], (err, result) => {
+                const insertQuery = 'INSERT INTO readings (date, meter_reading, daily_generation, user_id) VALUES (?, ?, ?, ?)';
+                db.query(insertQuery, [reading_date, today_reading, daily_generation, userId], (err, result) => {
                     if (err) {
                         console.error('Error inserting new reading:', err);
                         return res.status(500).json({
@@ -326,9 +438,10 @@ function calculateStats(readings) {
     const totalGeneration = readings.reduce((sum, reading) =>
         sum + (parseFloat(reading.daily_generation) || 0), 0);
 
-    const ratePerKwh = 15;
+    const ratePerKwh = 2.25;
+    reading_length = readings.length - 1;
     const totalSavings = totalGeneration * ratePerKwh;
-    const avgGeneration = totalGeneration / readings.length;
+    const avgGeneration = totalGeneration / reading_length;
     const efficiency = calculateEfficiency(avgGeneration);
 
     return {
@@ -341,8 +454,8 @@ function calculateStats(readings) {
 
 // Helper function to calculate efficiency percentage
 function calculateEfficiency(avgGeneration) {
-    // Assuming optimal generation is around 30 kWh per day
-    const optimalGeneration = 30;
+    // Assuming optimal generation is around 18 kWh per day
+    const optimalGeneration = 18;
     const efficiency = Math.min(100, (avgGeneration / optimalGeneration) * 100);
     return Math.round(efficiency * 10) / 10; // Round to 1 decimal place
 }
@@ -350,6 +463,7 @@ function calculateEfficiency(avgGeneration) {
 // API endpoint to delete a reading
 app.delete('/api/readings/:date', (req, res) => {
     const date = req.params.date;
+    console.log(`Deleting reading for date: ${date}`);
 
     const deleteQuery = 'DELETE FROM readings WHERE date = ?';
     db.query(deleteQuery, [date], (err, result) => {
@@ -373,4 +487,9 @@ app.delete('/api/readings/:date', (req, res) => {
             message: 'Reading deleted successfully'
         });
     });
+});
+
+
+app.listen(process.env.PORT || 3000, () => {
+    console.log(`Server running on port: http://localhost:${process.env.PORT || 3000}`);
 });
