@@ -300,11 +300,6 @@ class SolarDashboard {
                     <td>${reading.meter_reading.toFixed(2)} kWh</td>
                     <td>${reading.daily_generation.toFixed(2)} kWh</td>
                     <td>₹${(reading.daily_generation * 2.25).toFixed(0)}</td>
-                    <td>
-                        <button class="btn-danger btn-small" onclick="deleteReading('${reading.date}')">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </td>
                 </tr>
             `).join('');
         } catch (error) {

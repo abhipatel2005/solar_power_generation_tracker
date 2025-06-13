@@ -109,44 +109,116 @@ app.get('/api/chart-data', (req, res) => {
 });
 
 // API endpoint for dashboard statistics
-app.get('/api/stats', (req, res) => {
+// app.get('/api/stats', (req, res) => {
+//     const queries = {
+//         total: 'SELECT SUM(daily_generation) as total_generation FROM readings',
+//         monthly: `SELECT SUM(daily_generation) as monthly_generation 
+//                   FROM readings 
+//                   WHERE date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)`,
+//         today: `SELECT daily_generation, meter_reading 
+//                 FROM readings 
+//                 ORDER BY date DESC 
+//                 LIMIT 1`,
+//         average: `SELECT AVG(daily_generation) AS avg_generation
+//                     FROM readings
+//                     WHERE date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+//                     AND daily_generation != 0;`
+//     };
+
+//     // Execute all queries
+//     Promise.all([
+//         new Promise((resolve, reject) => {
+//             db.query(queries.total, (err, results) => {
+//                 if (err) reject(err);
+//                 else resolve(results[0]?.total_generation || 0);
+//             });
+//         }),
+//         new Promise((resolve, reject) => {
+//             db.query(queries.monthly, (err, results) => {
+//                 if (err) reject(err);
+//                 else resolve(results[0]?.monthly_generation || 0);
+//             });
+//         }),
+//         new Promise((resolve, reject) => {
+//             db.query(queries.today, (err, results) => {
+//                 if (err) reject(err);
+//                 else resolve(results[0] || { daily_generation: 0, meter_reading: 0 });
+//             });
+//         }),
+//         new Promise((resolve, reject) => {
+//             db.query(queries.average, (err, results) => {
+//                 if (err) reject(err);
+//                 else resolve(results[0]?.avg_generation || 0);
+//             });
+//         })
+//     ])
+//         .then(([totalGeneration, monthlyGeneration, todayData, avgGeneration]) => {
+//             const ratePerKwh = 2.25; // Rate per kWh in rupees
+//             const stats = {
+//                 todayGeneration: parseFloat(todayData.daily_generation) || 0,
+//                 totalGeneration: parseFloat(totalGeneration) || 0,
+//                 monthlyGeneration: parseFloat(monthlyGeneration) || 0,
+//                 currentMeterReading: parseFloat(todayData.meter_reading) || 0,
+//                 totalSavings: (parseFloat(totalGeneration) || 0) * ratePerKwh,
+//                 monthlySavings: (parseFloat(monthlyGeneration) || 0) * ratePerKwh,
+//                 avgGeneration: parseFloat(avgGeneration) || 0,
+//                 efficiency: calculateEfficiency(parseFloat(avgGeneration) || 0)
+//             };
+
+//             res.json(stats);
+//         })
+//         .catch(err => {
+//             console.error("Error fetching stats:", err);
+//             res.status(500).json({ error: 'Failed to fetch statistics' });
+//         });
+// });
+
+app.get('/api/stats/', (req, res) => {
+    // Extract userId from request parameters
+    const userId = req.session.userId;
+
+    if (!userId) {
+        return res.status(400).json({ error: 'User ID is required' });
+    }
+
     const queries = {
-        total: 'SELECT SUM(daily_generation) as total_generation FROM readings',
-        monthly: `SELECT SUM(daily_generation) as monthly_generation 
-                  FROM readings 
-                  WHERE date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)`,
-        today: `SELECT daily_generation, meter_reading 
-                FROM readings 
-                ORDER BY date DESC 
+        total: 'SELECT SUM(daily_generation) as total_generation FROM readings WHERE user_id = ?',
+        monthly: `SELECT SUM(daily_generation) as monthly_generation
+                  FROM readings
+                  WHERE date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) AND user_id = ?`,
+        today: `SELECT daily_generation, meter_reading
+                FROM readings
+                WHERE user_id = ?
+                ORDER BY date DESC
                 LIMIT 1`,
         average: `SELECT AVG(daily_generation) AS avg_generation
-                    FROM readings
-                    WHERE date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-                    AND daily_generation != 0;`
+                  FROM readings
+                  WHERE date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                  AND daily_generation != 0 AND user_id = ?`
     };
 
     // Execute all queries
     Promise.all([
         new Promise((resolve, reject) => {
-            db.query(queries.total, (err, results) => {
+            db.query(queries.total, [userId], (err, results) => { // Pass userId as parameter
                 if (err) reject(err);
                 else resolve(results[0]?.total_generation || 0);
             });
         }),
         new Promise((resolve, reject) => {
-            db.query(queries.monthly, (err, results) => {
+            db.query(queries.monthly, [userId], (err, results) => { // Pass userId as parameter
                 if (err) reject(err);
                 else resolve(results[0]?.monthly_generation || 0);
             });
         }),
         new Promise((resolve, reject) => {
-            db.query(queries.today, (err, results) => {
+            db.query(queries.today, [userId], (err, results) => { // Pass userId as parameter
                 if (err) reject(err);
                 else resolve(results[0] || { daily_generation: 0, meter_reading: 0 });
             });
         }),
         new Promise((resolve, reject) => {
-            db.query(queries.average, (err, results) => {
+            db.query(queries.average, [userId], (err, results) => { // Pass userId as parameter
                 if (err) reject(err);
                 else resolve(results[0]?.avg_generation || 0);
             });
@@ -172,6 +244,7 @@ app.get('/api/stats', (req, res) => {
             res.status(500).json({ error: 'Failed to fetch statistics' });
         });
 });
+
 
 //register user
 app.post('/register', (req, res) => {
@@ -254,7 +327,6 @@ app.post('/add_readings', (req, res) => {
     const inputDate = req.body.date.toISOString().split('T')[0];
     const today = new Date().toISOString().split('T')[0];
     const userId = req.session.userId;
-    console.log(userId)
 
     // Prevent historical entries
     if (inputDate < today) {
@@ -459,35 +531,6 @@ function calculateEfficiency(avgGeneration) {
     const efficiency = Math.min(100, (avgGeneration / optimalGeneration) * 100);
     return Math.round(efficiency * 10) / 10; // Round to 1 decimal place
 }
-
-// API endpoint to delete a reading
-app.delete('/api/readings/:date', (req, res) => {
-    const date = req.params.date;
-    console.log(`Deleting reading for date: ${date}`);
-
-    const deleteQuery = 'DELETE FROM readings WHERE date = ?';
-    db.query(deleteQuery, [date], (err, result) => {
-        if (err) {
-            console.error('Error deleting reading:', err);
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to delete reading.'
-            });
-        }
-
-        if (result.affectedRows === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Reading not found.'
-            });
-        }
-
-        res.json({
-            success: true,
-            message: 'Reading deleted successfully'
-        });
-    });
-});
 
 
 app.listen(process.env.PORT || 3000, () => {
