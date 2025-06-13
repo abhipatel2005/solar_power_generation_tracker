@@ -33,7 +33,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 //configure session
 app.use(session({
-    secret: process.env.secret, // use a strong secret in production!
+    secret: process.env.SECRET,
     resave: false,
     saveUninitialized: false,
     cookie: { secure: false } // set `true` only if using HTTPS
