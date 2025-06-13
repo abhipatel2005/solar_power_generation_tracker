@@ -5,6 +5,7 @@ const bodyParser = require('body-parser');
 const mysql2 = require('mysql2');
 const path = require('path');
 const crypto = require('crypto');
+const MySQLStore = require('express-mysql-session')(session);
 const dotenv = require('dotenv');
 dotenv.config();
 
@@ -32,11 +33,36 @@ app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 
 //configure session
+// app.use(session({
+//     secret: process.env.SECRET,
+//     resave: false,
+//     saveUninitialized: false,
+//     cookie: { secure: false } // set `true` only if using HTTPS
+// }));
+
+
+const options = {
+    host: process.env.HOST,
+    port: process.env.DATABASE_PORT,
+    user: process.env.USER,
+    password: process.env.PASSWORD,
+    database: process.env.DATABASE,
+};
+
+// Create MySQL session store
+const sessionStore = new MySQLStore(options);
+
+// Use session middleware
 app.use(session({
-    secret: process.env.SECRET,
+    key: 'session_cookie_name',
+    secret: process.env.SESSION_SECRET || 'some_secret_key',
+    store: sessionStore,
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false } // set `true` only if using HTTPS
+    cookie: {
+        secure: false, // set to true if using HTTPS
+        maxAge: 1000 * 60 * 60 * 24, // 1 day
+    },
 }));
 
 
